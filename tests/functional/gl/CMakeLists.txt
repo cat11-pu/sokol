@@ -39,3 +39,18 @@ foreach (i RANGE ${last_gl_version})
         ${CMAKE_CURRENT_SOURCE_DIR}/..)
     configure_c(${target})
 endforeach()
+
+# Headless upload-path benchmark (see source header for details). Built once
+# per GL flavour from the same mock setup as the smoke tests.
+set(bench_target sokol-upload-bench)
+add_executable(${bench_target} sokol_gfx_upload_bench.c)
+if (SOKOL_BACKEND STREQUAL "SOKOL_GLCORE")
+    target_compile_definitions(${bench_target} PRIVATE GL_MOCK_VERSION=430)
+else()
+    target_compile_definitions(${bench_target} PRIVATE GL_MOCK_VERSION=320)
+endif()
+target_include_directories(${bench_target} PRIVATE
+    ${CMAKE_SOURCE_DIR}/..
+    ${CMAKE_SOURCE_DIR}/../util
+    ${CMAKE_CURRENT_SOURCE_DIR}/..)
+configure_c(${bench_target})
