@@ -4139,7 +4139,23 @@ UTEST(sokol_gfx_gl, sampler_wrap_filter_border_aniso) {
 //  all pixel formats: texture creation with initial data / as attachment
 //------------------------------------------------------------------------------
 UTEST(sokol_gfx_gl, image_all_pixel_formats) {
-    setup();
+    // deferred reclamation keeps destroyed slots occupied until sg_commit(),
+    // so size the image pool for all formats created and destroyed in-frame
+    if (sg_isvalid()) {
+        sg_shutdown();
+        gl_mock_shutdown();
+    }
+    reset_log();
+    gl_mock_setup();
+    sg_setup(&(sg_desc){
+        .environment.defaults = {
+            .color_format = SG_PIXELFORMAT_RGBA8,
+            .depth_format = SG_PIXELFORMAT_DEPTH_STENCIL,
+            .sample_count = 1,
+        },
+        .image_pool_size = 256,
+        .logger.func = capture_log,
+    });
     static uint8_t data[4 * 4 * 16 * 2];
     int num_tested = 0;
     for (int i = SG_PIXELFORMAT_NONE + 1; i < _SG_PIXELFORMAT_NUM; i++) {

@@ -159,8 +159,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_buffers) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_buffer(buf[i]);
         T(sg_query_buffer_state(buf[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.buffer_pool.queue_top);
+        T((i+1) == _sg.pools.buffer_pool.destroy_queue_top);
+        T(0 == _sg.pools.buffer_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.buffer_pool.queue_top);
+    T(0 == _sg.pools.buffer_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -190,8 +195,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_images) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_image(img[i]);
         T(sg_query_image_state(img[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.image_pool.queue_top);
+        T((i+1) == _sg.pools.image_pool.destroy_queue_top);
+        T(0 == _sg.pools.image_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.image_pool.queue_top);
+    T(0 == _sg.pools.image_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -220,8 +230,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_samplers) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_sampler(smp[i]);
         T(sg_query_sampler_state(smp[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.sampler_pool.queue_top);
+        T((i+1) == _sg.pools.sampler_pool.destroy_queue_top);
+        T(0 == _sg.pools.sampler_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.sampler_pool.queue_top);
+    T(0 == _sg.pools.sampler_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -251,8 +266,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_shaders) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_shader(shd[i]);
         T(sg_query_shader_state(shd[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.shader_pool.queue_top);
+        T((i+1) == _sg.pools.shader_pool.destroy_queue_top);
+        T(0 == _sg.pools.shader_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.shader_pool.queue_top);
+    T(0 == _sg.pools.shader_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -283,8 +303,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_pipelines) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_pipeline(pip[i]);
         T(sg_query_pipeline_state(pip[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.pipeline_pool.queue_top);
+        T((i+1) == _sg.pools.pipeline_pool.destroy_queue_top);
+        T(0 == _sg.pools.pipeline_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.pipeline_pool.queue_top);
+    T(0 == _sg.pools.pipeline_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -314,8 +339,13 @@ UTEST(sokol_gfx, alloc_fail_destroy_views) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_view(views[i]);
         T(sg_query_view_state(views[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.view_pool.queue_top);
+        T((i+1) == _sg.pools.view_pool.destroy_queue_top);
+        T(0 == _sg.pools.view_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.view_pool.queue_top);
+    T(0 == _sg.pools.view_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -354,8 +384,13 @@ UTEST(sokol_gfx, make_destroy_buffers) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_buffer(buf[i]);
         T(sg_query_buffer_state(buf[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.buffer_pool.queue_top);
+        T((i+1) == _sg.pools.buffer_pool.destroy_queue_top);
+        T(0 == _sg.pools.buffer_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.buffer_pool.queue_top);
+    T(0 == _sg.pools.buffer_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -399,8 +434,13 @@ UTEST(sokol_gfx, make_destroy_images) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_image(img[i]);
         T(sg_query_image_state(img[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.image_pool.queue_top);
+        T((i+1) == _sg.pools.image_pool.destroy_queue_top);
+        T(0 == _sg.pools.image_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.image_pool.queue_top);
+    T(0 == _sg.pools.image_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -439,8 +479,13 @@ UTEST(sokol_gfx, make_destroy_samplers) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_sampler(smp[i]);
         T(sg_query_sampler_state(smp[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.sampler_pool.queue_top);
+        T((i+1) == _sg.pools.sampler_pool.destroy_queue_top);
+        T(0 == _sg.pools.sampler_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.sampler_pool.queue_top);
+    T(0 == _sg.pools.sampler_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -524,8 +569,13 @@ UTEST(sokol_gfx, make_destroy_shaders) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_shader(shd[i]);
         T(sg_query_shader_state(shd[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.shader_pool.queue_top);
+        T((i+1) == _sg.pools.shader_pool.destroy_queue_top);
+        T(0 == _sg.pools.shader_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.shader_pool.queue_top);
+    T(0 == _sg.pools.shader_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -569,8 +619,13 @@ UTEST(sokol_gfx, make_destroy_pipelines) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_pipeline(pip[i]);
         T(sg_query_pipeline_state(pip[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.pipeline_pool.queue_top);
+        T((i+1) == _sg.pools.pipeline_pool.destroy_queue_top);
+        T(0 == _sg.pools.pipeline_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.pipeline_pool.queue_top);
+    T(0 == _sg.pools.pipeline_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -604,8 +659,13 @@ UTEST(sokol_gfx, make_destroy_views) {
     for (int i = 0; i < 3; i++) {
         sg_destroy_view(views[i]);
         T(sg_query_view_state(views[i]) == SG_RESOURCESTATE_INVALID);
-        T((i+1) == _sg.pools.view_pool.queue_top);
+        T((i+1) == _sg.pools.view_pool.destroy_queue_top);
+        T(0 == _sg.pools.view_pool.queue_top);
     }
+    /* deferred reclamation: slots return to the free pool at sg_commit() */
+    sg_commit();
+    T(3 == _sg.pools.view_pool.queue_top);
+    T(0 == _sg.pools.view_pool.destroy_queue_top);
     sg_shutdown();
 }
 
@@ -623,6 +683,12 @@ UTEST(sokol_gfx, generation_counter) {
         T(_sg_slot_index(buf.id) == 1); /* slot index should remain the same */
         sg_destroy_buffer(buf);
         T(sg_query_buffer_state(buf) == SG_RESOURCESTATE_INVALID);
+        /* the slot is only reusable after the frame-end reclamation */
+        T(0 == _sg.pools.buffer_pool.queue_top);
+        T(1 == _sg.pools.buffer_pool.destroy_queue_top);
+        sg_commit();
+        T(1 == _sg.pools.buffer_pool.queue_top);
+        T(0 == _sg.pools.buffer_pool.destroy_queue_top);
     }
     sg_shutdown();
 }

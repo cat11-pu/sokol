@@ -15,15 +15,23 @@ if (NOT BACKEND_MOCK_ONLY)
         sokol_debugtext_test.c
         sokol_fetch_test.c
         sokol_gfx_test.c
+        sokol_gfx_lifecycle_stress_test.c
         sokol_gl_test.c
         sokol_shape_test.c
         sokol_color_test.c
         sokol_spine_test.c
         sokol_test.c
     )
+    # sokol_gfx_lifecycle_stress_test.c provides its own UTEST_MAIN(), so it
+    # is built as a standalone executable instead of being bundled into
+    # sokol-test (which gets main() from sokol_test.c).
+    list(REMOVE_ITEM c_sources sokol_gfx_lifecycle_stress_test.c)
     add_executable(sokol-test ${c_sources})
     target_link_libraries(sokol-test PUBLIC spine)
     configure_c(sokol-test)
+
+    add_executable(sokol-gfx-lifecycle-test sokol_gfx_lifecycle_stress_test.c)
+    configure_c(sokol-gfx-lifecycle-test)
 endif()
 
 # D3D11 backend tests. Only built in mock mode with SOKOL_D3D11 selected.
