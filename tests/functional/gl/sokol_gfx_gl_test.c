@@ -1125,6 +1125,203 @@ UTEST(sokol_gfx_gl, offscreen_msaa_pass_blit_resolves) {
     teardown();
 }
 
+//------------------------------------------------------------------------------
+//  offscreen render-to-texture vs swapchain rendering
+//------------------------------------------------------------------------------
+
+// GL calls that affect the rendered pixels, excluding framebuffer
+// management and clear calls
+static bool is_draw_stream_func(gl_mock_func_t func) {
+    switch (func) {
+        case GL_MOCK_FUNC_glViewport:
+        case GL_MOCK_FUNC_glScissor:
+        case GL_MOCK_FUNC_glUseProgram:
+        case GL_MOCK_FUNC_glBindVertexArray:
+        case GL_MOCK_FUNC_glBindBuffer:
+        case GL_MOCK_FUNC_glBindBufferBase:
+        case GL_MOCK_FUNC_glBindBufferRange:
+        case GL_MOCK_FUNC_glBindTexture:
+        case GL_MOCK_FUNC_glActiveTexture:
+        case GL_MOCK_FUNC_glVertexAttribPointer:
+        case GL_MOCK_FUNC_glVertexAttribIPointer:
+        case GL_MOCK_FUNC_glEnableVertexAttribArray:
+        case GL_MOCK_FUNC_glDisableVertexAttribArray:
+        case GL_MOCK_FUNC_glVertexAttribDivisor:
+        case GL_MOCK_FUNC_glDrawArrays:
+        case GL_MOCK_FUNC_glDrawArraysInstanced:
+        case GL_MOCK_FUNC_glDrawArraysInstancedBaseInstance:
+        case GL_MOCK_FUNC_glDrawElements:
+        case GL_MOCK_FUNC_glDrawElementsInstanced:
+        case GL_MOCK_FUNC_glDrawElementsBaseVertex:
+        case GL_MOCK_FUNC_glDrawElementsInstancedBaseVertex:
+        case GL_MOCK_FUNC_glDrawElementsInstancedBaseVertexBaseInstance:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static int collect_draw_stream(gl_mock_call_t* out, int max_out) {
+    int n = 0;
+    const int num_calls = gl_mock_num_calls();
+    for (int i = 0; (i < num_calls) && (n < max_out); i++) {
+        const gl_mock_call_t* c = gl_mock_call(i);
+        if (is_draw_stream_func(c->func)) {
+            out[n++] = *c;
+        }
+    }
+    return n;
+}
+
+static bool draw_stream_equal(const gl_mock_call_t* a, const gl_mock_call_t* b, int n) {
+    for (int i = 0; i < n; i++) {
+        if ((a[i].func != b[i].func) || (a[i].num_args != b[i].num_args)) {
+            return false;
+        }
+        for (int j = 0; j < a[i].num_args; j++) {
+            if (a[i].args[j].u != b[i].args[j].u) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+UTEST(sokol_gfx_gl, offscreen_vs_swapchain_identical_draw_stream) {
+    setup();
+    sg_shader shd = make_test_shader();
+    sg_pipeline pip = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
+        // the offscreen pass has no depth attachment
+        .depth.pixel_format = SG_PIXELFORMAT_NONE,
+    });
+    const float verts[9] = { 0 };
+    sg_buffer vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .usage.vertex_buffer = true,
+        .data = SG_RANGE(verts),
+    });
+    sg_image rt = sg_make_image(&(sg_image_desc){
+        .width = 64, .height = 64, .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.color_attachment = true,
+    });
+    sg_view att = sg_make_view(&(sg_view_desc){ .color_attachment.image = rt });
+    const sg_pass swapchain_pass = { .swapchain = {
+        .width = 64, .height = 64, .sample_count = 1,
+        .color_format = SG_PIXELFORMAT_RGBA8,
+        // match the depth-less offscreen pass
+        .depth_format = SG_PIXELFORMAT_NONE,
+    }};
+    const sg_pass offscreen_pass = { .attachments = { .colors = { att } }};
+    // warmup: creates the cached VAO and configures the offscreen framebuffer
+    for (int i = 0; i < 2; i++) {
+        sg_begin_pass(&swapchain_pass);
+        sg_apply_pipeline(pip);
+        sg_apply_bindings(&(sg_bindings){ .vertex_buffers[0] = vbuf });
+        sg_draw(0, 3, 1);
+        sg_end_pass();
+        sg_begin_pass(&offscreen_pass);
+        sg_apply_pipeline(pip);
+        sg_apply_bindings(&(sg_bindings){ .vertex_buffers[0] = vbuf });
+        sg_draw(0, 3, 1);
+        sg_end_pass();
+        sg_commit();
+    }
+    // record the swapchain-pass draw stream
+    gl_mock_clear_calls();
+    sg_begin_pass(&swapchain_pass);
+    sg_apply_pipeline(pip);
+    sg_apply_bindings(&(sg_bindings){ .vertex_buffers[0] = vbuf });
+    sg_draw(0, 3, 1);
+    sg_end_pass();
+    sg_commit();
+    gl_mock_call_t swapchain_stream[64];
+    const int num_swapchain = collect_draw_stream(swapchain_stream, 64);
+    // record the offscreen-pass draw stream
+    gl_mock_clear_calls();
+    sg_begin_pass(&offscreen_pass);
+    sg_apply_pipeline(pip);
+    sg_apply_bindings(&(sg_bindings){ .vertex_buffers[0] = vbuf });
+    sg_draw(0, 3, 1);
+    sg_end_pass();
+    sg_commit();
+    gl_mock_call_t offscreen_stream[64];
+    const int num_offscreen = collect_draw_stream(offscreen_stream, 64);
+    // identical GL draw stream means identical rendered pixels
+    T(num_swapchain > 0);
+    T(num_swapchain == num_offscreen);
+    T(draw_stream_equal(swapchain_stream, offscreen_stream, num_swapchain));
+    T(num_error_logs == 0);
+    sg_destroy_view(att);
+    sg_destroy_image(rt);
+    sg_destroy_buffer(vbuf);
+    sg_destroy_pipeline(pip);
+    sg_destroy_shader(shd);
+    T(sg_isvalid());
+    teardown();
+}
+
+UTEST(sokol_gfx_gl, offscreen_then_swapchain_state_restored) {
+    setup();
+    sg_image rt = sg_make_image(&(sg_image_desc){
+        .width = 64, .height = 64, .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.color_attachment = true,
+    });
+    sg_view att = sg_make_view(&(sg_view_desc){ .color_attachment.image = rt });
+    sg_begin_pass(&(sg_pass){ .attachments = { .colors = { att } } });
+    sg_end_pass();
+    // switching back to the default target must restore framebuffer,
+    // viewport and scissor to the swapchain state
+    gl_mock_clear_calls();
+    sg_begin_pass(&(sg_pass){ .swapchain = {
+        .width = 640, .height = 480, .sample_count = 1,
+        .color_format = SG_PIXELFORMAT_RGBA8,
+    }});
+    T(gl_mock_bindings()->draw_framebuffer == 0);
+    const gl_mock_render_state_t* st = gl_mock_render_state();
+    T(st->viewport[0] == 0 && st->viewport[1] == 0);
+    T(st->viewport[2] == 640 && st->viewport[3] == 480);
+    T(st->scissor[0] == 0 && st->scissor[1] == 0);
+    T(st->scissor[2] == 640 && st->scissor[3] == 480);
+    sg_end_pass();
+    sg_commit();
+    T(num_error_logs == 0);
+    sg_destroy_view(att);
+    sg_destroy_image(rt);
+    T(sg_isvalid());
+    teardown();
+}
+
+UTEST(sokol_gfx_gl, offscreen_switch_100x_no_leak) {
+    setup();
+    sg_image rt = sg_make_image(&(sg_image_desc){
+        .width = 64, .height = 64, .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.color_attachment = true,
+    });
+    sg_view att = sg_make_view(&(sg_view_desc){ .color_attachment.image = rt });
+    const int baseline = gl_mock_live_objects_total();
+    for (int i = 0; i < 100; i++) {
+        gl_mock_clear_calls();
+        sg_begin_pass(&(sg_pass){ .attachments = { .colors = { att } } });
+        sg_end_pass();
+        sg_begin_pass(&(sg_pass){ .swapchain = {
+            .width = 64, .height = 64, .sample_count = 1,
+            .color_format = SG_PIXELFORMAT_RGBA8,
+        }});
+        sg_end_pass();
+        sg_commit();
+    }
+    T(!gl_mock_call_log_overflow());
+    T(num_error_logs == 0);
+    // 100 target switches must not create or leak any GL objects
+    T(gl_mock_live_objects_total() == baseline);
+    sg_destroy_view(att);
+    sg_destroy_image(rt);
+    T(sg_isvalid());
+    teardown();
+    T(gl_mock_live_objects_total() == 0);
+}
+
 #if TEST_HAS_COMPUTE
 UTEST(sokol_gfx_gl, compute_pass_no_framebuffer_bind) {
     setup();

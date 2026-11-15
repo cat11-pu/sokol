@@ -6934,3 +6934,186 @@ UTEST(sokol_gfx, next_draw_valid_compute_pass) {
     T(num_failed == 0);
     sg_shutdown();
 }
+
+//------------------------------------------------------------------------------
+//  offscreen render-to-texture
+//------------------------------------------------------------------------------
+
+// render-target image plus its attachment and texture views
+typedef struct {
+    sg_image img;
+    sg_view att_view;
+    sg_view tex_view;
+} offscreen_target_t;
+
+static offscreen_target_t make_offscreen_target(int w, int h, sg_pixel_format fmt) {
+    offscreen_target_t t;
+    t.img = sg_make_image(&(sg_image_desc){
+        .usage.color_attachment = true,
+        .width = w,
+        .height = h,
+        .pixel_format = fmt,
+    });
+    t.att_view = sg_make_view(&(sg_view_desc){ .color_attachment.image = t.img });
+    t.tex_view = sg_make_view(&(sg_view_desc){ .texture.image = t.img });
+    return t;
+}
+
+static void destroy_offscreen_target(offscreen_target_t* t) {
+    sg_destroy_view(t->tex_view);
+    sg_destroy_view(t->att_view);
+    sg_destroy_image(t->img);
+    *t = (offscreen_target_t){0};
+}
+
+#define OFFSCREEN_TEST_SWAPCHAIN_PASS &(sg_pass){ \
+    .swapchain = { \
+        .width = 64, \
+        .height = 64, \
+        .sample_count = 1, \
+        .color_format = SG_PIXELFORMAT_RGBA8, \
+    } \
+}
+
+UTEST(sokol_gfx, offscreen_pass_lifecycle) {
+    setup(&(sg_desc){0});
+    offscreen_target_t t = make_offscreen_target(64, 64, SG_PIXELFORMAT_RGBA8);
+    T(sg_query_image_state(t.img) == SG_RESOURCESTATE_VALID);
+    T(sg_query_view_state(t.att_view) == SG_RESOURCESTATE_VALID);
+    T(sg_query_view_state(t.tex_view) == SG_RESOURCESTATE_VALID);
+    T(sg_query_pass_state() == SG_PASSSTATE_NONE);
+    sg_begin_pass(&(sg_pass){ .attachments = { .colors = { t.att_view } } });
+    T(sg_query_pass_state() == SG_PASSSTATE_RENDER);
+    sg_end_pass();
+    T(sg_query_pass_state() == SG_PASSSTATE_NONE);
+    // switch back to the default target leaves a clean state
+    sg_begin_pass(OFFSCREEN_TEST_SWAPCHAIN_PASS);
+    T(sg_query_pass_state() == SG_PASSSTATE_RENDER);
+    sg_end_pass();
+    T(sg_query_pass_state() == SG_PASSSTATE_NONE);
+    sg_commit();
+    T(num_log_called == 0);
+    destroy_offscreen_target(&t);
+    sg_shutdown();
+}
+
+UTEST(sokol_gfx, offscreen_target_sizes) {
+    setup(&(sg_desc){0});
+    // minimum size
+    offscreen_target_t t1 = make_offscreen_target(1, 1, SG_PIXELFORMAT_RGBA8);
+    T(sg_query_image_state(t1.img) == SG_RESOURCESTATE_VALID);
+    // non-power-of-two size
+    offscreen_target_t t2 = make_offscreen_target(513, 257, SG_PIXELFORMAT_RGBA8);
+    T(sg_query_image_state(t2.img) == SG_RESOURCESTATE_VALID);
+    // default pixel format comes from sg_desc.environment.defaults.color_format
+    offscreen_target_t t3 = make_offscreen_target(64, 64, 0);
+    T(sg_query_image_state(t3.img) == SG_RESOURCESTATE_VALID);
+    T(sg_query_image_desc(t3.img).pixel_format == SG_PIXELFORMAT_RGBA8);
+    T(num_log_called == 0);
+    destroy_offscreen_target(&t1);
+    destroy_offscreen_target(&t2);
+    destroy_offscreen_target(&t3);
+    sg_shutdown();
+}
+
+UTEST(sokol_gfx, offscreen_render_then_sample) {
+    setup(&(sg_desc){0});
+    offscreen_target_t t = make_offscreen_target(64, 64, SG_PIXELFORMAT_RGBA8);
+    const float verts[9] = {0};
+    sg_buffer vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .usage.vertex_buffer = true,
+        .data = SG_RANGE(verts),
+    });
+    // pass 1 pipeline: no texture bindings, no depth attachment in the
+    // offscreen pass so the pipeline depth format must be NONE
+    sg_pipeline pip_draw = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = sg_make_shader(&(sg_shader_desc){0}),
+        .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
+        .depth.pixel_format = SG_PIXELFORMAT_NONE,
+    });
+    // pass 2 pipeline: samples the offscreen target as texture
+    sg_sampler smp = sg_make_sampler(&(sg_sampler_desc){0});
+    sg_shader shd_sample = sg_make_shader(&(sg_shader_desc){
+        .views[0].texture = {
+            .stage = SG_SHADERSTAGE_FRAGMENT,
+            .image_type = SG_IMAGETYPE_2D,
+            .sample_type = SG_IMAGESAMPLETYPE_FLOAT,
+        },
+        .samplers[0] = {
+            .stage = SG_SHADERSTAGE_FRAGMENT,
+            .sampler_type = SG_SAMPLERTYPE_FILTERING,
+        },
+        .texture_sampler_pairs[0] = {
+            .stage = SG_SHADERSTAGE_FRAGMENT,
+            .view_slot = 0,
+            .sampler_slot = 0,
+        },
+    });
+    sg_pipeline pip_sample = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd_sample,
+        .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
+    });
+    // pass 1: render into the offscreen target
+    sg_begin_pass(&(sg_pass){ .attachments = { .colors = { t.att_view } } });
+    sg_apply_pipeline(pip_draw);
+    sg_apply_bindings(&(sg_bindings){ .vertex_buffers[0] = vbuf });
+    sg_draw(0, 3, 1);
+    sg_end_pass();
+    // pass 2: sample the target as texture in the default pass
+    sg_begin_pass(OFFSCREEN_TEST_SWAPCHAIN_PASS);
+    sg_apply_pipeline(pip_sample);
+    sg_apply_bindings(&(sg_bindings){
+        .vertex_buffers[0] = vbuf,
+        .views[0] = t.tex_view,
+        .samplers[0] = smp,
+    });
+    sg_draw(0, 3, 1);
+    sg_end_pass();
+    sg_commit();
+    T(num_log_called == 0);
+    sg_destroy_pipeline(pip_sample);
+    sg_destroy_shader(shd_sample);
+    sg_destroy_sampler(smp);
+    sg_destroy_pipeline(pip_draw);
+    sg_destroy_buffer(vbuf);
+    destroy_offscreen_target(&t);
+    sg_shutdown();
+}
+
+UTEST(sokol_gfx, offscreen_switch_100x_no_leak) {
+    setup(&(sg_desc){0});
+    offscreen_target_t t = make_offscreen_target(64, 64, SG_PIXELFORMAT_RGBA8);
+    // 100x switch between offscreen and default target
+    for (int i = 0; i < 100; i++) {
+        sg_begin_pass(&(sg_pass){ .attachments = { .colors = { t.att_view } } });
+        sg_end_pass();
+        sg_begin_pass(OFFSCREEN_TEST_SWAPCHAIN_PASS);
+        sg_end_pass();
+        sg_commit();
+        T(sg_query_pass_state() == SG_PASSSTATE_NONE);
+    }
+    T(num_log_called == 0);
+    destroy_offscreen_target(&t);
+    // 100x create/use/destroy must reuse the same pool slots (no leak)
+    const sg_image_desc img_desc = {
+        .usage.color_attachment = true,
+        .width = 64,
+        .height = 64,
+    };
+    sg_image img = sg_make_image(&img_desc);
+    sg_view view = sg_make_view(&(sg_view_desc){ .color_attachment.image = img });
+    const int img_slot = _sg_slot_index(img.id);
+    const int view_slot = _sg_slot_index(view.id);
+    sg_destroy_view(view);
+    sg_destroy_image(img);
+    for (int i = 0; i < 100; i++) {
+        img = sg_make_image(&img_desc);
+        view = sg_make_view(&(sg_view_desc){ .color_attachment.image = img });
+        T(_sg_slot_index(img.id) == img_slot);
+        T(_sg_slot_index(view.id) == view_slot);
+        sg_destroy_view(view);
+        sg_destroy_image(img);
+    }
+    T(num_log_called == 0);
+    sg_shutdown();
+}
