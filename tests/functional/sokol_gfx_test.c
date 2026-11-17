@@ -6934,3 +6934,99 @@ UTEST(sokol_gfx, next_draw_valid_compute_pass) {
     T(num_failed == 0);
     sg_shutdown();
 }
+
+// illegal pipeline desc: out-of-range attr buffer_index must fail validation, not assert
+UTEST(sokol_gfx, pipeline_desc_illegal_buffer_index_no_assert) {
+    setup(&(sg_desc){0});
+    sg_shader shd = create_shader();
+    sg_pipeline pip_hi = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout.attrs[0] = { .format = SG_VERTEXFORMAT_FLOAT3, .buffer_index = SG_MAX_VERTEXBUFFER_BINDSLOTS },
+    });
+    T(sg_query_pipeline_state(pip_hi) == SG_RESOURCESTATE_FAILED);
+    sg_pipeline pip_neg = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout.attrs[0] = { .format = SG_VERTEXFORMAT_FLOAT3, .buffer_index = -1 },
+    });
+    T(sg_query_pipeline_state(pip_neg) == SG_RESOURCESTATE_FAILED);
+    sg_destroy_pipeline(pip_hi);
+    sg_destroy_pipeline(pip_neg);
+    sg_destroy_shader(shd);
+    sg_shutdown();
+}
+
+// same illegal pipeline desc with validation disabled must also not assert
+UTEST(sokol_gfx, pipeline_desc_illegal_buffer_index_validation_disabled) {
+    setup(&(sg_desc){ .disable_validation = true });
+    sg_shader shd = create_shader();
+    sg_pipeline pip = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout.attrs[0] = { .format = SG_VERTEXFORMAT_FLOAT3, .buffer_index = 99 },
+    });
+    // with validation disabled the call must not assert; the handle stays queryable
+    (void)sg_query_pipeline_state(pip);
+    sg_destroy_pipeline(pip);
+    sg_destroy_shader(shd);
+    sg_shutdown();
+}
+
+// bogus resource ids must be treated as invalid, never assert in the slot lookup
+UTEST(sokol_gfx, bogus_resource_ids_no_assert) {
+    setup(&(sg_desc){0});
+    const uint32_t bad_ids[] = { 1u, 256u, 1024u, 4096u, 65535u };
+    for (size_t i = 0; i < sizeof(bad_ids)/sizeof(bad_ids[0]); i++) {
+        T(sg_query_buffer_state((sg_buffer){ .id = bad_ids[i] }) == SG_RESOURCESTATE_INVALID);
+        T(sg_query_image_state((sg_image){ .id = bad_ids[i] }) == SG_RESOURCESTATE_INVALID);
+        T(sg_query_pipeline_state((sg_pipeline){ .id = bad_ids[i] }) == SG_RESOURCESTATE_INVALID);
+        T(sg_query_view_state((sg_view){ .id = bad_ids[i] }) == SG_RESOURCESTATE_INVALID);
+        sg_destroy_buffer((sg_buffer){ .id = bad_ids[i] });
+        sg_destroy_view((sg_view){ .id = bad_ids[i] });
+    }
+    // a bogus attachment id must fail begin-pass validation without asserting
+    sg_begin_pass(&(sg_pass){
+        .attachments = { .colors[0] = { .id = 65000u } },
+    });
+    T(sg_query_pass_state() == SG_PASSSTATE_RENDER);
+    sg_end_pass();
+    T(sg_query_pass_state() == SG_PASSSTATE_NONE);
+    sg_shutdown();
+}
+
+// out-of-range uniform slot and null data must be rejected, not asserted
+UTEST(sokol_gfx, apply_uniforms_bad_args_no_assert) {
+    setup(&(sg_desc){0});
+    const float data[16] = {0};
+    sg_image img = create_image();
+    sg_view view = sg_make_view(&(sg_view_desc){ .color_attachment = { .image = img } });
+    sg_begin_pass(&(sg_pass){ .attachments = { .colors[0] = view } });
+    sg_apply_uniforms(SG_MAX_UNIFORMBLOCK_BINDSLOTS, &(sg_range){ .ptr = data, .size = sizeof(data) });
+    sg_apply_uniforms(-1, &(sg_range){ .ptr = data, .size = sizeof(data) });
+    sg_apply_uniforms(0, &(sg_range){ .ptr = 0, .size = 0 });
+    sg_end_pass();
+    sg_destroy_view(view);
+    sg_destroy_image(img);
+    sg_shutdown();
+}
+
+// missing required bindings must skip the draw, not assert inside sg_apply_bindings
+UTEST(sokol_gfx, apply_bindings_missing_required_no_assert) {
+    setup(&(sg_desc){0});
+    sg_shader shd = create_shader();
+    sg_pipeline pip = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
+    });
+    T(sg_query_pipeline_state(pip) == SG_RESOURCESTATE_VALID);
+    sg_image img = create_image();
+    sg_view view = sg_make_view(&(sg_view_desc){ .color_attachment = { .image = img } });
+    sg_begin_pass(&(sg_pass){ .attachments = { .colors[0] = view } });
+    sg_apply_pipeline(pip);
+    sg_apply_bindings(&(sg_bindings){0});
+    sg_draw(0, 3, 1);
+    sg_end_pass();
+    sg_destroy_view(view);
+    sg_destroy_image(img);
+    sg_destroy_pipeline(pip);
+    sg_destroy_shader(shd);
+    sg_shutdown();
+}
