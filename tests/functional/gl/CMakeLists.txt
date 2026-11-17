@@ -26,7 +26,10 @@ foreach (i RANGE ${last_gl_version})
     list(GET gl_names ${i} gl_name)
     list(GET gl_apple ${i} apple)
     set(target sokol-${gl_name}-test)
-    add_executable(${target} sokol_gfx_gl_test.c)
+    add_executable(${target}
+        sokol_gfx_gl_test.c
+        sokol_render_target_pool_gl_test.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../render_target_pool.c)
     target_compile_definitions(${target} PRIVATE
         GL_MOCK_VERSION=${gl_version}
         GL_MOCK_APPLE_PIXEL_UNPACK_OFFSET_BROKEN=${apple})

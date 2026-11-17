@@ -15,6 +15,8 @@ if (NOT BACKEND_MOCK_ONLY)
         sokol_debugtext_test.c
         sokol_fetch_test.c
         sokol_gfx_test.c
+        render_target_pool.c
+        sokol_render_target_pool_test.c
         sokol_gl_test.c
         sokol_shape_test.c
         sokol_color_test.c

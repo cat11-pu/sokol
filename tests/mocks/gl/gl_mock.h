@@ -23,6 +23,7 @@
 
 #include "gl.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 #define GL_MOCK_MAX_OBJECTS (256)
 #define GL_MOCK_MAX_CALLS (4096)
@@ -223,6 +224,9 @@ extern int gl_mock_live_objects_total(void);
 extern bool gl_mock_is_object(gl_mock_obj_t kind, GLuint name);
 extern bool gl_mock_buffer_info(GLuint name, gl_mock_buffer_info_t* out);
 extern bool gl_mock_texture_info(GLuint name, gl_mock_texture_info_t* out);
+// Read back the mock's RGBA8 content shadow. Returns false if the texture has
+// no RGBA8 shadow, 'dst_size' is not width*height*4, or the name is invalid.
+extern bool gl_mock_texture_read_rgba8(GLuint name, uint8_t* dst, size_t dst_size);
 extern bool gl_mock_sampler_info(GLuint name, gl_mock_sampler_info_t* out);
 extern bool gl_mock_framebuffer_info(GLuint name, gl_mock_framebuffer_info_t* out);
 extern bool gl_mock_renderbuffer_info(GLuint name, gl_mock_renderbuffer_info_t* out);

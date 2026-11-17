@@ -23,6 +23,7 @@
 #include "gl_mock.h"
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #define _GLM_MAX_ERRORS (8)
 #define _GLM_MAX_INT_OVERRIDES (32)
@@ -99,6 +100,12 @@ typedef struct {
 } _glm_prog_priv_t;
 
 typedef struct {
+    uint8_t* pixels;
+    GLsizei width;
+    GLsizei height;
+} _glm_rgba8_shadow_t;
+
+typedef struct {
     bool valid;
 
     // object tracking
@@ -113,6 +120,7 @@ typedef struct {
     gl_mock_shader_info_t shader[GL_MOCK_MAX_OBJECTS];
     gl_mock_program_info_t program[GL_MOCK_MAX_OBJECTS];
     _glm_prog_priv_t prog_priv[GL_MOCK_MAX_OBJECTS];
+    _glm_rgba8_shadow_t rgba8[GL_MOCK_MAX_OBJECTS];
 
     // bound state
     gl_mock_bindings_t bindings;
@@ -146,6 +154,35 @@ typedef struct {
 static _glm_state_t _glm;
 
 //-- helpers -------------------------------------------------------------------
+static void _glm_rgba8_free(GLuint name) {
+    if ((name == 0) || (name > (GLuint)GL_MOCK_MAX_OBJECTS)) {
+        return;
+    }
+    _glm_rgba8_shadow_t* shadow = &_glm.rgba8[name - 1];
+    free(shadow->pixels);
+    memset(shadow, 0, sizeof(*shadow));
+}
+
+static void _glm_rgba8_set(GLuint name, GLsizei width, GLsizei height, GLenum internal_format, const void* pixels) {
+    if ((name == 0) || (name > (GLuint)GL_MOCK_MAX_OBJECTS)
+        || (width <= 0) || (height <= 0)
+        || (internal_format != GL_RGBA8)) {
+        _glm_rgba8_free(name);
+        return;
+    }
+    _glm_rgba8_shadow_t* shadow = &_glm.rgba8[name - 1];
+    const size_t size = (size_t)width * (size_t)height * 4;
+    if ((shadow->width != width) || (shadow->height != height) || !shadow->pixels) {
+        free(shadow->pixels);
+        shadow->pixels = (uint8_t*)calloc(size, 1);
+        shadow->width = width;
+        shadow->height = height;
+    }
+    if (shadow->pixels && pixels) {
+        memcpy(shadow->pixels, pixels, size);
+    }
+}
+
 static gl_mock_arg_t _glm_ai(int64_t v) {
     gl_mock_arg_t a = {0};
     a.i = v;
@@ -208,6 +245,9 @@ static GLuint _glm_alloc(gl_mock_obj_t kind) {
 
 static void _glm_free(gl_mock_obj_t kind, GLuint name) {
     if (_glm_valid(kind, name)) {
+        if (kind == GL_MOCK_OBJ_TEXTURE) {
+            _glm_rgba8_free(name);
+        }
         _glm.alive[kind][name - 1] = false;
         _glm.live_count[kind]--;
     }
@@ -261,6 +301,10 @@ static gl_mock_texture_info_t* _glm_cur_tex(GLenum target) {
         return &_glm.texture[_glm_idx(name)];
     }
     return 0;
+}
+
+static GLuint _glm_cur_tex_name(GLenum target) {
+    return _glm.tex_bindings[_glm_active_unit()][_glm_tex_target_index(target)];
 }
 
 // the buffer currently bound to 'target'
@@ -415,6 +459,9 @@ static void _glm_copy_info_log(GLsizei bufSize, GLsizei* length, GLchar* infoLog
 
 //-- public control API --------------------------------------------------------
 void gl_mock_setup(void) {
+    for (int i = 0; i < GL_MOCK_MAX_OBJECTS; i++) {
+        _glm_rgba8_free((GLuint)(i + 1));
+    }
     memset(&_glm, 0, sizeof(_glm));
     _glm.valid = true;
     _glm.bindings.active_texture = GL_TEXTURE0;
@@ -450,6 +497,9 @@ void gl_mock_setup(void) {
 }
 
 void gl_mock_shutdown(void) {
+    for (int i = 0; i < GL_MOCK_MAX_OBJECTS; i++) {
+        _glm_rgba8_free((GLuint)(i + 1));
+    }
     memset(&_glm, 0, sizeof(_glm));
 }
 
@@ -488,6 +538,22 @@ bool gl_mock_is_object(gl_mock_obj_t kind, GLuint name) {
 
 _GLM_INFO_GETTER(gl_mock_buffer_info, GL_MOCK_OBJ_BUFFER, buffer, gl_mock_buffer_info_t)
 _GLM_INFO_GETTER(gl_mock_texture_info, GL_MOCK_OBJ_TEXTURE, texture, gl_mock_texture_info_t)
+
+bool gl_mock_texture_read_rgba8(GLuint name, uint8_t* dst, size_t dst_size) {
+    if (!dst || !_glm_valid(GL_MOCK_OBJ_TEXTURE, name)) {
+        return false;
+    }
+    const _glm_rgba8_shadow_t* shadow = &_glm.rgba8[_glm_idx(name)];
+    if (!shadow->pixels) {
+        return false;
+    }
+    const size_t needed = (size_t)shadow->width * (size_t)shadow->height * 4;
+    if (dst_size != needed) {
+        return false;
+    }
+    memcpy(dst, shadow->pixels, needed);
+    return true;
+}
 _GLM_INFO_GETTER(gl_mock_sampler_info, GL_MOCK_OBJ_SAMPLER, sampler, gl_mock_sampler_info_t)
 _GLM_INFO_GETTER(gl_mock_renderbuffer_info, GL_MOCK_OBJ_RENDERBUFFER, renderbuffer, gl_mock_renderbuffer_info_t)
 _GLM_INFO_GETTER(gl_mock_shader_info, GL_MOCK_OBJ_SHADER, shader, gl_mock_shader_info_t)
@@ -879,6 +945,10 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
         }
         tex->num_image++;
     }
+    if (level == 0) {
+        const void* shadow_pixels = (_glm.bindings.pixel_unpack_buffer == 0) ? pixels : 0;
+        _glm_rgba8_set(_glm_cur_tex_name(target), width, height, (GLenum)internalformat, shadow_pixels);
+    }
 }
 
 void glTexImage3D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const void* pixels) {
@@ -900,6 +970,22 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
     gl_mock_texture_info_t* tex = _glm_cur_tex(target);
     if (tex) {
         _glm_count_subimage(tex);
+    }
+    if ((level == 0) && (pixels != 0) && (_glm.bindings.pixel_unpack_buffer == 0)) {
+        const GLuint name = _glm_cur_tex_name(target);
+        if ((name > 0) && (name <= (GLuint)GL_MOCK_MAX_OBJECTS)) {
+            _glm_rgba8_shadow_t* shadow = &_glm.rgba8[name - 1];
+            if (shadow->pixels
+                && (xoffset >= 0) && (yoffset >= 0)
+                && ((xoffset + width) <= shadow->width)
+                && ((yoffset + height) <= shadow->height)) {
+                for (GLsizei y = 0; y < height; y++) {
+                    const size_t dst_offset = ((size_t)(yoffset + y) * (size_t)shadow->width + (size_t)xoffset) * 4;
+                    const size_t src_offset = (size_t)y * (size_t)width * 4;
+                    memcpy(shadow->pixels + dst_offset, (const uint8_t*)pixels + src_offset, (size_t)width * 4);
+                }
+            }
+        }
     }
 }
 
@@ -966,6 +1052,7 @@ void glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsize
         tex->height = height;
         tex->depth = 1;
     }
+    _glm_rgba8_set(_glm_cur_tex_name(target), width, height, internalformat, 0);
 }
 
 void glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth) {
@@ -1658,6 +1745,51 @@ void glPixelStorei(GLenum pname, GLint param) {
 }
 
 //-- clear ---------------------------------------------------------------------
+static uint8_t _glm_unorm8(float value) {
+    if (!(value > 0.0f)) {
+        return 0;
+    }
+    if (value >= 1.0f) {
+        return 255;
+    }
+    return (uint8_t)(value * 255.0f + 0.5f);
+}
+
+static void _glm_clear_color_attachment(GLint drawbuffer, const GLfloat* value) {
+    if ((drawbuffer < 0) || (drawbuffer >= GL_MOCK_MAX_COLOR_ATTACHMENTS)) {
+        return;
+    }
+    gl_mock_framebuffer_info_t* fb = _glm_fb_info(_glm.bindings.draw_framebuffer);
+    if (!fb) {
+        return;
+    }
+    const GLenum attachment = (GLenum)((GLint)GL_COLOR_ATTACHMENT0 + drawbuffer);
+    for (int i = 0; i < fb->num_attachments; i++) {
+        if (fb->attachments[i].attachment != attachment) {
+            continue;
+        }
+        const GLuint name = fb->attachments[i].texture;
+        if ((name == 0) || (name > (GLuint)GL_MOCK_MAX_OBJECTS)) {
+            return;
+        }
+        _glm_rgba8_shadow_t* shadow = &_glm.rgba8[name - 1];
+        if (!shadow->pixels) {
+            return;
+        }
+        const uint8_t rgba[4] = {
+            _glm_unorm8(value[0]),
+            _glm_unorm8(value[1]),
+            _glm_unorm8(value[2]),
+            _glm_unorm8(value[3]),
+        };
+        const size_t num_pixels = (size_t)shadow->width * (size_t)shadow->height;
+        for (size_t p = 0; p < num_pixels; p++) {
+            memcpy(&shadow->pixels[p * 4], rgba, sizeof(rgba));
+        }
+        return;
+    }
+}
+
 void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
     assert(value);
     GLfloat v[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -1666,6 +1798,9 @@ void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
         v[i] = value[i];
     }
     _GLM_REC(glClearBufferfv, _glm_ai(buffer), _glm_ai(drawbuffer), _glm_af(v[0]), _glm_af(v[1]), _glm_af(v[2]), _glm_af(v[3]));
+    if (buffer == GL_COLOR) {
+        _glm_clear_color_attachment(drawbuffer, v);
+    }
 }
 
 void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
